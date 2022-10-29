@@ -113,6 +113,7 @@ where
                 return Poll::Ready(Err(socket_err()));
             }
             let message = ready!(self.messages.poll_next_unpin(cx)).ok_or_else(socket_err)??;
+            log::trace!("got netlink message {:?}", message);
             match message {
                 RtnlMessage::NewAddress(msg) => self.add_address(msg),
                 RtnlMessage::DelAddress(msg) => self.rem_address(msg),
