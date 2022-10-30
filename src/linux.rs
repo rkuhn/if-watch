@@ -105,15 +105,29 @@ where
 
     /// Poll for an address change event.
     pub fn poll_if_event(&mut self, cx: &mut Context) -> Poll<Result<IfEvent>> {
+        let waker = unsafe {
+            std::task::Waker::from_raw(std::task::RawWaker::new(
+                Box::into_raw(Box::new(cx.waker().clone())) as *const (),
+                &vtable::VTABLE,
+            ))
+        };
+        let mut cx = Context::from_waker(&waker);
+        let cx = &mut cx;
         loop {
             if let Some(event) = self.queue.pop_front() {
                 return Poll::Ready(Ok(event));
             }
+            log::trace!("polling connection ({:?})", std::thread::current().id());
             if Pin::new(&mut self.conn).poll(cx).is_ready() {
                 return Poll::Ready(Err(socket_err()));
             }
+            log::trace!("polling messages ({:?})", std::thread::current().id());
             let message = ready!(self.messages.poll_next_unpin(cx)).ok_or_else(socket_err)??;
-            log::trace!("got netlink message {:?}", message);
+            log::trace!(
+                "got netlink message {:?} ({:?})",
+                message,
+                std::thread::current().id()
+            );
             match message {
                 RtnlMessage::NewAddress(msg) => self.add_address(msg),
                 RtnlMessage::DelAddress(msg) => self.rem_address(msg),
@@ -121,6 +135,30 @@ where
             }
         }
     }
+}
+
+mod vtable {
+    use std::task::{RawWaker, RawWakerVTable, Waker};
+
+    unsafe fn clone(ptr: *const ()) -> RawWaker {
+        log::trace!("CLONE ({:?})", std::thread::current().id());
+        let waker = (&*(ptr as *const Waker)).clone();
+        let ptr = Box::into_raw(Box::new(waker));
+        RawWaker::new(ptr as _, &VTABLE)
+    }
+    unsafe fn wake(ptr: *const ()) {
+        log::trace!("WAKE ({:?})", std::thread::current().id());
+        let waker = Box::from_raw(ptr as *mut Waker);
+        waker.wake();
+    }
+    unsafe fn wake_by_ref(ptr: *const ()) {
+        log::trace!("WAKE_BY_REF ({:?})", std::thread::current().id());
+        (&*(ptr as *const Waker)).wake_by_ref()
+    }
+    unsafe fn drop(ptr: *const ()) {
+        Box::from_raw(ptr as *mut Waker);
+    }
+    pub const VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
 }
 
 fn socket_err() -> std::io::Error {
