@@ -56,7 +56,9 @@ pub use win::smol;
 
 #[cfg(target_os = "linux")]
 #[cfg(feature = "tokio")]
-pub use linux::tokio::IfWatcher;
+pub use linux::tokio;
+
+pub use tokio::IfWatcher;
 
 #[cfg(target_os = "linux")]
 #[cfg(feature = "smol")]
